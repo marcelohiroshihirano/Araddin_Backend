@@ -83,7 +83,8 @@ const orderSchema = Joi.object({
     postalCode: Joi.string().required(),
     notes: Joi.string(),
     currency: Joi.string().required(),
-    items: Joi.array().required().min(1).items(itemSchema)
+    items: Joi.array().required().min(1).items(itemSchema),
+    user: Joi.string().required()
 })
 
 export const createOrder = functions.https.onRequest(async (req, res) => {
@@ -95,7 +96,7 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
         res.status(400).send({ error : result.error });
     }
     try {
-        await admin.firestore().doc(`/product/${req.query.shop}`).get();
+        await admin.firestore().doc(`/product/${params.shop}`).get();
     } catch (error) {
         console.log('Error getting messages', error.message);
         res.status(400).send({ error : "Shop doesn't exits "});
@@ -105,8 +106,9 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
     const items: Item[] = [];
     for (const element of params.items) {
         try {
-            const snapshot = await admin.firestore().doc(`/product/${req.query.shop}/item/${element.item}`).get()
-            items.push({quantity: Number(element.quantity), item: element.item, value: snapshot.data()?.price })
+            const snapshot = await admin.firestore().doc(`/product/${params.shop}/item/${element.item}`).get()
+            console.log("PRICE " + snapshot.data()?.price)
+            items.push({quantity: Number(element.quantity), item: element.item, value: 4.0 })
         } catch (error) {
             console.log('Error getting messages', error.message);
             res.status(400).send({ error : `Item ${element.item} doesn't exits. ` });
@@ -128,9 +130,11 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
         taxes: [{ VAT : 0.8 }],
         city: params.city,
         country: params.country,
-        user: req.user,
+        user: params.user,
         delivered: false,
     }
+
+    console.log(order)
     
     if (req.query.notes) {
         order.notes = params.notes;
@@ -143,7 +147,9 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
     try {
         const ref = await admin.firestore().collection("/order").add(order)
         const saved_order = await ref.get()
-        res.status(200).send({ data: { "order_id": saved_order.id, "data": saved_order.data()} });
+        const data =  saved_order.data()
+        data!.id = saved_order.id
+        res.status(200).send({ data });
     } catch (error) {
         console.log('Error getting messages', error.message);
         res.sendStatus(500);

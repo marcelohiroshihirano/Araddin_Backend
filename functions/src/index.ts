@@ -1,39 +1,9 @@
 import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
-import * as express from 'express';
-import * as Joi from '@hapi/joi'
-import {
-    ContainerTypes,
-    // Use this as a replacement for express.Request
-    ValidatedRequest,
-    // Extend from this to define a valid schema type/interface
-    ValidatedRequestSchema,
-    // Creates a validator that generates middlewares
-    createValidator
-} from 'express-joi-validation'
+import * as Joi from 'joi'
 import { Order, Item } from './apptypes'
 
-
 admin.initializeApp();
-const app = express();
-
-/*const authenticate = async (req: express.Request, res: express.Response, next: Function) => {
-    if (!req.headers.authorization || !req.headers.authorization.startsWith('Bearer ')) {
-        res.status(403).send('Unauthorized');
-        return;
-    }
-    const idToken = req.headers.authorization.split('Bearer ')[1];
-    try {
-        const decodedIdToken = await admin.auth().verifyIdToken(idToken);
-        req.user = decodedIdToken;
-        next();
-        return;
-    } catch (e) {
-        res.status(403).send('Unauthorized');
-        return;
-    }
-};
-app.use(authenticate);*/
 
 export const orderAfterSave = functions.firestore
     .document('order/{orderID}')
@@ -45,61 +15,64 @@ export const orderAfterSave = functions.firestore
         return document?.update(timeValues);
     });
 
-app.get('/shops', async (req: express.Request, res: express.Response) => {
+
+export const getShops = functions.https.onRequest(async (req, res) => {
     const query = admin.firestore().collection(`/shop`)
     try {
         const snapshot = await query.get();
         const shop: any = [];
         snapshot.forEach((childSnapshot) => {
-            shop.push({ "shop_id": childSnapshot.id, "data": childSnapshot.data() });
+            const values = childSnapshot.data()
+            values.id = childSnapshot.id
+            shop.push(values);
         });
 
-        res.set('Cache-Control', 'private, max-age=300');
-        res.status(200).json(shop);
+        res.status(200).send( { data: { "shops": shop } } );
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.sendStatus(500);
+        res.status(500).send({ error :  error });
     }
 });
-
-app.get('/shop/:shopId/products', async (req: express.Request, res: express.Response) => {
-    const shopId = req.params.shopId;
+export const getProducts = functions.https.onRequest(async (req, res) => {
+    const shopId = req.body.data.shopId;
+    console.log("DATA.shopId " + req.body.data.shopId)
     const query = admin.firestore().collection(`/product/${shopId}/item`)
     try {
         const snapshot = await query.get();
         const products: any = [];
         snapshot.forEach((childSnapshot) => {
-            products.push({ id: childSnapshot.id, data: childSnapshot.data() });
+            const values = childSnapshot.data()
+            values.id = childSnapshot.id
+            products.push(values);
         });
 
-        res.set('Cache-Control', 'private, max-age=300');
-        res.status(200).json({ "shop_id": `${shopId}`, "products": products });
+        res.status(200).send({ data: { "shop_id": `${shopId}`, "products": products }});
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.sendStatus(500);
+        res.status(404).send({ error :  error });
     }
 });
 
-app.get('/order/:orderId', async (req: express.Request, res: express.Response) => {
-    const orderId = req.params.orderId;
+export const getOrder = functions.https.onRequest(async (req, res) => {
+    const orderId = req.body.data.orderId;
     const query = admin.firestore().doc(`/order/${orderId}`)
     try {
         const snapshot = await query.get();
-        res.set('Cache-Control', 'private, max-age=300');
-        res.status(200).json({ "order_id": snapshot.id, "data": snapshot.data() });
+        const data = snapshot.data()
+        data!.id = snapshot.id
+        res.status(200).send({ data });
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.sendStatus(404);
+        res.status(404).send({ error :  error });
     }
 });
-
-const validator = createValidator()
 
 const itemSchema = Joi.object({
     item: Joi.string().required(),
     quantity: Joi.number().positive().required(),
 })
-const querySchema = Joi.object({
+
+const orderSchema = Joi.object({
     shop: Joi.string().required(),
     locale: Joi.string().required(),
     address1: Joi.string().required(),
@@ -113,81 +86,66 @@ const querySchema = Joi.object({
     items: Joi.array().required().min(1).items(itemSchema)
 })
 
-interface OrderRequestSchema extends ValidatedRequestSchema {
-    [ContainerTypes.Query]: {
-        shop: string,
-        locale: string
-        address1: string,
-        address2: string,
-        city: string,
-        state: string,
-        country: string,
-        postalCode: string
-        notes: string,
-        items: [ { item: string, quantity: string }],
-        currency: string
-    }
-}
+export const createOrder = functions.https.onRequest(async (req, res) => {
 
-app.post('/order',
-    validator.query(querySchema),
-    async (req: ValidatedRequest<OrderRequestSchema>, res: express.Response) => {
-        
+    const params = req.body.data
+    console.log(params)
+    const result = Joi.validate(params, orderSchema)
+    if(result.error){
+        res.status(400).send({ error : result.error });
+    }
+    try {
+        await admin.firestore().doc(`/product/${req.query.shop}`).get();
+    } catch (error) {
+        console.log('Error getting messages', error.message);
+        res.status(400).send({ error : "Shop doesn't exits "});
+        return
+    }
+
+    const items: Item[] = [];
+    for (const element of params.items) {
         try {
-            await admin.firestore().doc(`/product/${req.query.shop}`).get();
+            const snapshot = await admin.firestore().doc(`/product/${req.query.shop}/item/${element.item}`).get()
+            items.push({quantity: Number(element.quantity), item: element.item, value: snapshot.data()?.price })
         } catch (error) {
             console.log('Error getting messages', error.message);
-            res.status(400).send("Shop doesn't exits ");
+            res.status(400).send({ error : `Item ${element.item} doesn't exits. ` });
             return
         }
+    }
 
-        const items: Item[] = [];
-        for (const element of req.query.items) {
-            try {
-                const snapshot = await admin.firestore().doc(`/product/${req.query.shop}/item/${element.item}`).get()
-                items.push({quantity: Number(element.quantity), item: element.item, value: snapshot.data()?.price })
-            } catch (error) {
-                console.log('Error getting messages', error.message);
-                res.status(400).send(`Item ${element.item} doesn't exits. `);
-                return
-            }
-        }
+    const order: Order = {
+        shop: params.shop,
+        locale: params.locale,
+        address1: params.address1,
+        postalCode: params.postalCode,
+        isPaid: false,
+        total: 30.0,
+        total_with_tax: 30.0,
+        state: params.state,
+        items: items,
+        currency: params.currency,
+        taxes: [{ VAT : 0.8 }],
+        city: params.city,
+        country: params.country,
+        user: req.user,
+        delivered: false,
+    }
+    
+    if (req.query.notes) {
+        order.notes = params.notes;
+    }
 
-        const order: Order = {
-            shop: req.query.shop,
-            locale: req.query.locale,
-            address1: req.query.address1,
-            postalCode: req.query.postalCode,
-            isPaid: false,
-            total: 30.0,
-            total_with_tax: 30.0,
-            state: req.query.state,
-            items: items,
-            currency: req.query.currency,
-            taxes: [{ VAT : 0.8 }],
-            city: req.query.city,
-            country: req.query.country,
-            user: "SASAS",
-            delivered: false,
-        }
-        
-        if (req.query.notes) {
-            order.notes = req.query.notes;
-        }
-
-        if (req.query.address2) {
-            order.address2 = req.query.address2;
-        }
-        
-        try {
-            const ref = await admin.firestore().collection("/order").add(order)
-            const saved_order = await ref.get()
-            res.status(200).json({ "order_id": saved_order.id, "data": saved_order.data()});
-        } catch (error) {
-            console.log('Error getting messages', error.message);
-            res.sendStatus(500);
-        }
-    });
-
-
-exports.api = functions.https.onRequest(app);
+    if (req.query.address2) {
+        order.address2 = params.address2;
+    }
+    
+    try {
+        const ref = await admin.firestore().collection("/order").add(order)
+        const saved_order = await ref.get()
+        res.status(200).send({ data: { "order_id": saved_order.id, "data": saved_order.data()} });
+    } catch (error) {
+        console.log('Error getting messages', error.message);
+        res.sendStatus(500);
+    }
+})

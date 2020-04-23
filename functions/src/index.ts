@@ -49,7 +49,7 @@ export const getProducts = functions.https.onRequest(async (req, res) => {
         res.status(200).send({ data: { "shop_id": `${shopId}`, "products": products }});
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.status(404).send({ error :  error });
+        res.status(404).send({ error :  error.message });
     }
 });
 
@@ -63,7 +63,7 @@ export const getOrder = functions.https.onRequest(async (req, res) => {
         res.status(200).send({ data });
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.status(404).send({ error :  error });
+        res.status(404).send({ error :  error.message });
     }
 });
 
@@ -76,12 +76,12 @@ const orderSchema = Joi.object({
     shop: Joi.string().required(),
     locale: Joi.string().required(),
     address1: Joi.string().required(),
-    address2: Joi.string(),
+    address2: Joi.string().optional().allow(''),
     city: Joi.string().required(),
     state: Joi.string().required(),
     country: Joi.string().required(),
     postalCode: Joi.string().required(),
-    notes: Joi.string(),
+    notes: Joi.string().optional().allow(''),
     currency: Joi.string().required(),
     items: Joi.array().required().min(1).items(itemSchema),
     user: Joi.string().required()
@@ -93,7 +93,7 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
     console.log(params)
     const result = Joi.validate(params, orderSchema)
     if(result.error){
-        res.status(400).send({ error : result.error });
+        res.status(400).send({ error : result.error.message });
     }
     try {
         await admin.firestore().doc(`/product/${params.shop}`).get();
@@ -152,6 +152,6 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
         res.status(200).send({ data });
     } catch (error) {
         console.log('Error getting messages', error.message);
-        res.sendStatus(500);
+        res.status(500).send({ error : error.message })
     }
 })

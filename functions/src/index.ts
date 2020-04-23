@@ -2,6 +2,7 @@ import * as functions from 'firebase-functions';
 import * as admin from 'firebase-admin';
 import * as Joi from 'joi'
 import { Order, Item } from './apptypes'
+import * as request from "request-promise-native";
 
 admin.initializeApp();
 
@@ -154,4 +155,16 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
         console.log('Error getting messages', error.message);
         res.status(500).send({ error : error.message })
     }
+})
+
+export const addressWithPostalcode = functions.https.onRequest(async (req, res) => {
+    const postalCode = req.body.data.postalCode;
+    const apiKey = `AIzaSyDEd8M9rwhIx7mm5_BuW2jVAv7b9alPC-I`;
+    const urlp = `https://maps.googleapis.com/maps/api/geocode/json?components=postal_code:${postalCode}|country:JP&language=ja&key=${apiKey}`;
+    
+    const options = { uri: urlp }
+    const result = await request.get(options);
+    console.log(result)
+    res.status(200).send( { data : JSON.parse(result) } )
+
 })

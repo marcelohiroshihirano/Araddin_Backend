@@ -3,6 +3,12 @@ import * as admin from 'firebase-admin';
 import * as Joi from 'joi'
 import { Order, Item } from './apptypes'
 import * as request from "request-promise-native";
+import * as mailgun from "mailgun-js";
+
+const GOOGLEAPIKEY = `AIzaSyDEd8M9rwhIx7mm5_BuW2jVAv7b9alPC-I`
+const EMAILKEY = "37a89d75c73d407c7b34b33a36af6519-f135b0f1-11fe4108"
+const EMAILDOMAIN = 'https://api.mailgun.net/v3/sandbox913c05c5c7a04bd689f4574a297e66bd.mailgun.org';
+const mg = mailgun({apiKey: EMAILKEY, domain: EMAILDOMAIN});
 
 admin.initializeApp();
 
@@ -89,7 +95,6 @@ const orderSchema = Joi.object({
 })
 
 export const createOrder = functions.https.onRequest(async (req, res) => {
-
     const params = req.body.data
     console.log(params)
     const result = Joi.validate(params, orderSchema)
@@ -145,11 +150,20 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
         order.address2 = params.address2;
     }
     
+
     try {
         const ref = await admin.firestore().collection("/order").add(order)
         const saved_order = await ref.get()
         const data =  saved_order.data()
         data!.id = saved_order.id
+
+        const email = {
+            from: 'Excited User <me@samples.mailgun.org>',
+            to: 'me@arturojamaica.com',
+            subject: `Order ${data!.id}`,
+            text: `Order has been created`
+        };
+        await mg.messages().send(email)
         res.status(200).send({ data });
     } catch (error) {
         console.log('Error getting messages', error.message);
@@ -159,9 +173,7 @@ export const createOrder = functions.https.onRequest(async (req, res) => {
 
 export const addressWithPostalcode = functions.https.onRequest(async (req, res) => {
     const postalCode = req.body.data.postalCode;
-    const apiKey = `AIzaSyDEd8M9rwhIx7mm5_BuW2jVAv7b9alPC-I`;
-    const urlp = `https://maps.googleapis.com/maps/api/geocode/json?components=postal_code:${postalCode}|country:JP&language=ja&key=${apiKey}`;
-    
+    const urlp = `https://maps.googleapis.com/maps/api/geocode/json?components=postal_code:${postalCode}|country:JP&language=ja&key=${GOOGLEAPIKEY}`;
     const options = { uri: urlp }
     const result = await request.get(options);
     console.log(result)
